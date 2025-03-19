@@ -27,6 +27,8 @@ enum InvalidElement {
     Type,
     Scope,
     Desc,
+    Body,
+    Footer,
 }
 
 impl fmt::Display for InvalidElement {
@@ -35,6 +37,8 @@ impl fmt::Display for InvalidElement {
             InvalidElement::Type => f.write_str("invalid element"),
             InvalidElement::Scope => f.write_str("invalid scope"),
             InvalidElement::Desc => f.write_str("invalid description"),
+            InvalidElement::Body => f.write_str("invalid body"),
+            InvalidElement::Footer => f.write_str("invalid footer"),
         }
     }
 }
@@ -71,6 +75,18 @@ impl Error {
     pub fn is_invalid_desc(&self) -> bool {
         matches!(self.code, InvalidElement::Desc)
     }
+
+    /// If the body element is invalid
+    #[must_use]
+    pub fn is_invalid_body(&self) -> bool {
+        matches!(self.code, InvalidElement::Body)
+    }
+
+    /// If the footer element is invalid
+    #[must_use]
+    pub fn is_invalid_footer(&self) -> bool {
+        matches!(self.code, InvalidElement::Footer)
+    }
 }
 
 /// Commit message parsed into the structured elements of the [Conventional
@@ -88,7 +104,8 @@ pub struct Commit<'a> {
     /// and similar variants.
     is_breaking_change: bool,
     desc: &'a str,
-    rest: &'a str,
+    body: &'a str,
+    footers: &'a str,
 }
 
 impl<'a> Commit<'a> {
@@ -105,7 +122,7 @@ impl<'a> Commit<'a> {
     #[inline]
     #[must_use]
     pub fn ty(&self) -> &'a str {
-        self.ty.trim()
+        self.ty
     }
 
     /// Returns the type of the conventional commit.
@@ -124,7 +141,7 @@ impl<'a> Commit<'a> {
     /// ```
     #[inline]
     pub fn scope(&self) -> Option<&'a str> {
-        self.scope.map(str::trim)
+        self.scope
     }
 
     /// Returns the type of the conventional commit.
@@ -138,10 +155,15 @@ impl<'a> Commit<'a> {
     /// # }
     /// ```
     pub fn desc(&self) -> &'a str {
-        self.desc.trim()
+        self.desc
     }
 
-    /// Returns the type of the conventional commit.
+    /// Returns true if the message indicates a breaking change.
+    ///
+    /// A breaking change is indicated by either:
+    ///
+    /// * a `!` following the type and optional scope
+    /// * a `BREAKING CHANGE` or `BREAKING-CHANGE` trailing footer
     ///
     /// ```rust
     /// # fn main() -> Result<(), convcommits::Error> {
@@ -160,7 +182,14 @@ impl<'a> Commit<'a> {
             return true;
         }
 
-        todo!()
+        // TODO: Need to scan trailing footers for BREAKING CHANGE
+
+        false
+    }
+
+    /// Returns the body of the conventional commit.
+    pub fn body(&self) -> &str {
+        self.body
     }
 }
 
@@ -364,8 +393,74 @@ pub fn parse(text: &str) -> Result<Commit<'_>, Error> {
                 scope,
                 is_breaking_change,
                 desc,
-                rest: "",
+                body: "",
+                footers: "",
             });
+        }
+    }
+
+    let Some((_, ch)) = char_indices.next() else {
+        return Ok(Commit {
+            ty,
+            scope,
+            is_breaking_change,
+            desc,
+            body: "",
+            footers: "",
+        });
+    };
+
+    if !is_newline_ch(ch) {
+        return Err(Error {
+            code: InvalidElement::Body,
+        });
+    }
+
+    let start_body_idx;
+
+    loop {
+        let Some((pos, ch)) = char_indices.next() else {
+            return Ok(Commit {
+                ty,
+                scope,
+                is_breaking_change,
+                desc,
+                body: "",
+                footers: "",
+            });
+        };
+
+        if !ch.is_whitespace() {
+            start_body_idx = pos;
+            break;
+        }
+    }
+
+    let mut end_body_idx = start_body_idx;
+    let mut is_last_ch_whitspace = false;
+
+    loop {
+        let Some((pos, ch)) = char_indices.next() else {
+            if !is_last_ch_whitspace {
+                end_body_idx = text.len();
+            }
+            return Ok(Commit {
+                ty,
+                scope,
+                is_breaking_change,
+                desc,
+                body: &text[start_body_idx..end_body_idx],
+                footers: "",
+            });
+        };
+
+        if ch.is_whitespace() {
+            if !is_last_ch_whitspace {
+                end_body_idx = pos;
+            }
+            is_last_ch_whitspace = true;
+        } else {
+            is_last_ch_whitspace = false;
         }
     }
 
@@ -374,7 +469,8 @@ pub fn parse(text: &str) -> Result<Commit<'_>, Error> {
         scope,
         is_breaking_change,
         desc,
-        rest: &text[end_desc_idx..],
+        body: &text[start_body_idx..end_body_idx],
+        footers: "",
     })
 }
 
@@ -383,18 +479,83 @@ mod tests {
     use super::*;
 
     #[test]
-    fn simple_msg_parse() -> Result<(), Error> {
+    fn parse_basic_msg() -> Result<(), Error> {
         let msg = r#"feat: add parser to implementation"#;
         let c = parse(msg)?;
-        assert_eq!(c.ty, "feat");
+        assert_eq!(c.ty(), "feat");
+        assert_eq!(c.scope(), None);
+        assert!(!c.is_breaking_change());
+        assert_eq!(c.desc(), "add parser to implementation");
+        assert_eq!(c.body(), "");
+        // TODO
         Ok(())
     }
 
     #[test]
-    fn simple_msg_ty_fix() -> Result<(), Error> {
-        let msg = r#"fix: modify ty to ignore spaces"#;
+    fn parse_breaking_change() -> Result<(), Error> {
+        let msg = r#"fix!: remove whitespace in scope"#;
         let c = parse(msg)?;
         assert_eq!(c.ty(), "fix");
+        assert_eq!(c.scope(), None);
+        assert!(c.is_breaking_change());
+        assert_eq!(c.desc(), "remove whitespace in scope");
+        assert_eq!(c.body(), "");
+        // TODO
+        Ok(())
+    }
+
+    #[test]
+    fn parse_scope_and_breaking_change() -> Result<(), Error> {
+        let msg = r#"fix(api)!: remove whitespace in scope"#;
+        let c = parse(msg)?;
+        assert_eq!(c.ty(), "fix");
+        assert_eq!(c.scope(), Some("api"));
+        assert!(c.is_breaking_change());
+        assert_eq!(c.desc(), "remove whitespace in scope");
+        assert_eq!(c.body(), "");
+        // TODO
+        Ok(())
+    }
+
+    #[test]
+    fn parse_no_body() -> Result<(), Error> {
+        let msg = r#"docs: fix spelling in README"#;
+        let c = parse(msg)?;
+        assert_eq!(c.ty(), "docs");
+        assert_eq!(c.scope(), None);
+        assert!(!c.is_breaking_change());
+        assert_eq!(c.desc(), "fix spelling in README");
+        assert_eq!(c.body(), "");
+        // TODO
+        Ok(())
+    }
+
+    #[test]
+    fn parse_scope() -> Result<(), Error> {
+        let msg = r#"feat(api): add scope parsing"#;
+        let c = parse(msg)?;
+        assert_eq!(c.ty(), "feat");
+        assert_eq!(c.scope(), Some("api"));
+        assert!(!c.is_breaking_change());
+        assert_eq!(c.desc(), "add scope parsing");
+        assert_eq!(c.body(), "");
+        // TODO
+        Ok(())
+    }
+
+    #[test]
+    fn parse_single_paragraph_body() -> Result<(), Error> {
+        let msg = r#"feat: add scope parsing
+
+Parse the scope in parentheses.
+"#;
+        let c = parse(msg)?;
+        assert_eq!(c.ty(), "feat");
+        assert_eq!(c.scope(), None);
+        assert!(!c.is_breaking_change());
+        assert_eq!(c.desc(), "add scope parsing");
+        assert_eq!(c.body(), "Parse the scope in parentheses.");
+        // TODO
         Ok(())
     }
 }
