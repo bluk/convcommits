@@ -1,0 +1,14 @@
+---
+source: crates/convcommits-tests/src/lib.rs
+expression: "&parsed_msg"
+info:
+  msg: "fix(parser): prevent parser from looping\n"
+input_file: crates/convcommits-tests/tests/resources/commits/ty-scope-desc-one-newline-no-body.txt
+---
+Ok:
+  ty: fix
+  scope: parser
+  is_breaking_change: false
+  desc: prevent parser from looping
+  body: ""
+  footer: ""

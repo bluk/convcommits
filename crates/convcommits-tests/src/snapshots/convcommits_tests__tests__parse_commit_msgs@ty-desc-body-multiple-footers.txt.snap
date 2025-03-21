@@ -1,0 +1,14 @@
+---
+source: crates/convcommits-tests/src/lib.rs
+expression: "&parsed_msg"
+info:
+  msg: "feat: add new parser\n\n- Add strict parser\n- Add lenient parser\n\nSigned-off-by: bot <bot@gexample.com>\n\nCo-authored-by: Jane Doe"
+input_file: crates/convcommits-tests/tests/resources/commits/ty-desc-body-multiple-footers.txt
+---
+Ok:
+  ty: feat
+  scope: ~
+  is_breaking_change: false
+  desc: add new parser
+  body: "- Add strict parser\n- Add lenient parser"
+  footer: "Signed-off-by: bot <bot@gexample.com>\n\nCo-authored-by: Jane Doe"

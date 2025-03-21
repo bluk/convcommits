@@ -1,0 +1,8 @@
+feat: add new parser
+
+- Add strict parser
+- Add lenient parser
+
+Signed-off-by: bot <bot@gexample.com>
+
+Co-authored-by: Jane Doe

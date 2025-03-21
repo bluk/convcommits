@@ -1,0 +1,3 @@
+docs(build): add build docs
+
+build: add new platforms

@@ -1,0 +1,14 @@
+---
+source: crates/convcommits-tests/src/lib.rs
+expression: "&parsed_msg"
+info:
+  msg: "feat: Add support for platform\n\nFixes: #37\n"
+input_file: crates/convcommits-tests/tests/resources/commits/ty-desc-github-footer.txt
+---
+Ok:
+  ty: feat
+  scope: ~
+  is_breaking_change: false
+  desc: Add support for platform
+  body: ""
+  footer: "Fixes: #37"

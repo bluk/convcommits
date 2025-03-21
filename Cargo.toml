@@ -6,7 +6,8 @@ members = [
 
 [workspace.dependencies]
 convcommits = { version = "0.1.0", path = "crates/convcommits/" }
-insta = { version = "1.42.2", features = ["glob", "serde"] }
+insta = { version = "1.42.2", features = ["glob", "serde", "yaml"] }
+proptest = { version = "1.6.0" }
 serde = { version = "1.0.219", features = ["derive"] }
 
 [profile.dev.package]

@@ -1,0 +1,14 @@
+---
+source: crates/convcommits-tests/src/lib.rs
+expression: "&parsed_msg"
+info:
+  msg: "docs(readme): add platforms\n\nUpdate supported platforms.\n\nCloses #437\n"
+input_file: crates/convcommits-tests/tests/resources/commits/ty-desc-body-github-footer.txt
+---
+Ok:
+  ty: docs
+  scope: readme
+  is_breaking_change: false
+  desc: add platforms
+  body: Update supported platforms.
+  footer: "Closes #437"

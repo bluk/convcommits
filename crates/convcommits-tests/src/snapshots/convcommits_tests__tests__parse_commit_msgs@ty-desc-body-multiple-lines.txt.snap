@@ -1,0 +1,14 @@
+---
+source: crates/convcommits-tests/src/lib.rs
+expression: "&parsed_msg"
+info:
+  msg: "docs: add method docs\n\nDocument methods on Message type.\n\nDocument parser method."
+input_file: crates/convcommits-tests/tests/resources/commits/ty-desc-body-multiple-lines.txt
+---
+Ok:
+  ty: docs
+  scope: ~
+  is_breaking_change: false
+  desc: add method docs
+  body: "Document methods on Message type.\n\nDocument parser method."
+  footer: ""

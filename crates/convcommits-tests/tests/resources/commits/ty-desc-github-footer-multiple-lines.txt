@@ -1,0 +1,5 @@
+docs: add platform support
+
+Closes #12
+
+Add documentation for multiple platforms.

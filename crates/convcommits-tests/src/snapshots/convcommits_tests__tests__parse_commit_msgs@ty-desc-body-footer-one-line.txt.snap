@@ -1,0 +1,14 @@
+---
+source: crates/convcommits-tests/src/lib.rs
+expression: "&parsed_msg"
+info:
+  msg: "feat: add support for tooling\n\nTooling support.\n\nAuthored-by: Jane Doe\n"
+input_file: crates/convcommits-tests/tests/resources/commits/ty-desc-body-footer-one-line.txt
+---
+Ok:
+  ty: feat
+  scope: ~
+  is_breaking_change: false
+  desc: add support for tooling
+  body: Tooling support.
+  footer: "Authored-by: Jane Doe"

@@ -188,12 +188,12 @@ impl<'a> Commit<'a> {
     }
 
     /// Returns the body of the conventional commit.
-    pub fn body(&self) -> &str {
+    pub fn body(&self) -> &'a str {
         self.body
     }
 
     /// Returns the footer of the conventional commit.
-    pub fn footer(&self) -> &str {
+    pub fn footer(&self) -> &'a str {
         self.footer
     }
 }
@@ -298,19 +298,30 @@ where
     Some((start_scope_idx, end_scope_idx))
 }
 
-fn parse_desc<I>(char_indices: &mut I) -> Option<(usize, Option<usize>)>
+fn parse_desc<I>(char_indices: &mut I) -> Option<(usize, usize)>
 where
     I: Iterator<Item = (usize, char)>,
 {
-    let (start_desc_idx, _) = expect_non_whitespace(char_indices)?;
+    let (start_idx, ch) = expect_non_whitespace(char_indices)?;
+
+    let mut end_idx = start_idx;
+    let mut last_ch = ch;
 
     loop {
         if let Some((pos, ch)) = char_indices.next() {
+            if !last_ch.is_whitespace() {
+                end_idx = pos;
+            }
+            last_ch = ch;
+
             if is_newline_ch(ch) {
-                return Some((start_desc_idx, Some(pos)));
+                return Some((start_idx, end_idx));
             }
         } else {
-            return Some((start_desc_idx, None));
+            if !last_ch.is_whitespace() {
+                end_idx += last_ch.len_utf8();
+            }
+            return Some((start_idx, end_idx));
         }
     }
 }
@@ -402,21 +413,10 @@ pub fn parse(text: &str) -> Result<Commit<'_>> {
         code: InvalidElement::Prefix,
     })?;
 
-    let desc = match parse_desc(&mut char_indices).ok_or(Error {
+    let (desc_start_idx, desc_end_idx) = parse_desc(&mut char_indices).ok_or(Error {
         code: InvalidElement::Desc,
-    })? {
-        (start_desc_idx, Some(end_desc_idx)) => &text[start_desc_idx..end_desc_idx],
-        (start_desc_idx, None) => {
-            return Ok(Commit {
-                ty,
-                scope,
-                is_breaking_change,
-                desc: &text[start_desc_idx..],
-                body: "",
-                footer: "",
-            });
-        }
-    };
+    })?;
+    let desc = &text[desc_start_idx..desc_end_idx];
 
     let Some((_, ch)) = char_indices.next() else {
         return Ok(Commit {
@@ -429,10 +429,31 @@ pub fn parse(text: &str) -> Result<Commit<'_>> {
         });
     };
 
-    if !is_newline_ch(ch) {
-        return Err(Error {
-            code: InvalidElement::Body,
-        });
+    match ch {
+        '\n' => {}
+        '\r' => {
+            let Some((_, ch)) = char_indices.next() else {
+                return Ok(Commit {
+                    ty,
+                    scope,
+                    is_breaking_change,
+                    desc,
+                    body: "",
+                    footer: "",
+                });
+            };
+
+            if !is_newline_ch(ch) {
+                return Err(Error {
+                    code: InvalidElement::Body,
+                });
+            }
+        }
+        _ => {
+            return Err(Error {
+                code: InvalidElement::Body,
+            });
+        }
     }
 
     let mut char_indices = char_indices.peekable();
@@ -694,6 +715,22 @@ Reviewed-By: example
         assert_eq!(c.desc(), "add scope parsing");
         assert_eq!(c.body(), "Parse the scope in parentheses.");
         assert_eq!(c.footer(), "Reviewed-By: example");
+        Ok(())
+    }
+
+    #[test]
+    fn parse_crlf_endline() -> Result<()> {
+        let msg = "feat: add scope parsing\r\n\r\nParse the scope in parentheses.\r\n\r\nAnother paragraph.";
+        let c = parse(msg)?;
+        assert_eq!(c.ty(), "feat");
+        assert_eq!(c.scope(), None);
+        assert!(!c.is_breaking_change());
+        assert_eq!(c.desc(), "add scope parsing");
+        assert_eq!(
+            c.body(),
+            "Parse the scope in parentheses.\r\n\r\nAnother paragraph."
+        );
+        assert_eq!(c.footer(), "");
         Ok(())
     }
 }

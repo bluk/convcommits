@@ -1,0 +1,14 @@
+---
+source: crates/convcommits-tests/src/lib.rs
+expression: "&parsed_msg"
+info:
+  msg: "docs: ! is a valid desc\n"
+input_file: crates/convcommits-tests/tests/resources/commits/ty-desc-with-exclamation-mark.txt
+---
+Ok:
+  ty: docs
+  scope: ~
+  is_breaking_change: false
+  desc: "! is a valid desc"
+  body: ""
+  footer: ""
