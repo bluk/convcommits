@@ -1,0 +1,17 @@
+---
+source: crates/convcommits-tests/src/lib.rs
+expression: "convcommits::parse(&msg)"
+info:
+  msg: "feat: add parser to implementation"
+input_file: crates/convcommits-tests/tests/resources/commits/feat-desc.txt
+---
+Ok(
+    Commit {
+        ty: "feat",
+        scope: None,
+        is_breaking_change: false,
+        desc: "add parser to implementation",
+        body: "",
+        footer: "",
+    },
+)

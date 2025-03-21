@@ -1,0 +1,17 @@
+---
+source: crates/convcommits-tests/src/lib.rs
+expression: "convcommits::parse(&msg)"
+info:
+  msg: "feat: add scope parsing\n\nParse the scope in parentheses."
+input_file: crates/convcommits-tests/tests/resources/commits/feat-body.txt
+---
+Ok(
+    Commit {
+        ty: "feat",
+        scope: None,
+        is_breaking_change: false,
+        desc: "add scope parsing",
+        body: "Parse the scope in parentheses.",
+        footer: "",
+    },
+)

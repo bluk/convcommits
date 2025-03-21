@@ -1,0 +1,11 @@
+[package]
+name = "convcommits-tests"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+convcommits.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+serde.workspace = true
