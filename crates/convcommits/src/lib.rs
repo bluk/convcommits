@@ -26,9 +26,9 @@ fn is_newline_ch(ch: char) -> bool {
 enum InvalidElement {
     Type,
     Scope,
+    Prefix,
     Desc,
     Body,
-    Footer,
 }
 
 impl fmt::Display for InvalidElement {
@@ -36,9 +36,9 @@ impl fmt::Display for InvalidElement {
         match self {
             InvalidElement::Type => f.write_str("invalid element"),
             InvalidElement::Scope => f.write_str("invalid scope"),
+            InvalidElement::Prefix => f.write_str("invalid prefix"),
             InvalidElement::Desc => f.write_str("invalid description"),
             InvalidElement::Body => f.write_str("invalid body"),
-            InvalidElement::Footer => f.write_str("invalid footer"),
         }
     }
 }
@@ -70,6 +70,12 @@ impl Error {
         matches!(self.code, InvalidElement::Scope)
     }
 
+    /// If the prefix element is invalid
+    #[must_use]
+    pub fn is_invalid_prefix(&self) -> bool {
+        matches!(self.code, InvalidElement::Prefix)
+    }
+
     /// If the description element is invalid
     #[must_use]
     pub fn is_invalid_desc(&self) -> bool {
@@ -80,12 +86,6 @@ impl Error {
     #[must_use]
     pub fn is_invalid_body(&self) -> bool {
         matches!(self.code, InvalidElement::Body)
-    }
-
-    /// If the footer element is invalid
-    #[must_use]
-    pub fn is_invalid_footer(&self) -> bool {
-        matches!(self.code, InvalidElement::Footer)
     }
 }
 
@@ -105,7 +105,7 @@ pub struct Commit<'a> {
     is_breaking_change: bool,
     desc: &'a str,
     body: &'a str,
-    footers: &'a str,
+    footer: &'a str,
 }
 
 impl<'a> Commit<'a> {
@@ -191,6 +191,128 @@ impl<'a> Commit<'a> {
     pub fn body(&self) -> &str {
         self.body
     }
+
+    /// Returns the footer of the conventional commit.
+    pub fn footer(&self) -> &str {
+        self.footer
+    }
+}
+
+/// Result type with the crate's [Error] type.
+pub type Result<T> = core::result::Result<T, Error>;
+
+fn skip_whitespace<I>(char_indices: &mut I) -> Option<(usize, char)>
+where
+    I: Iterator<Item = (usize, char)>,
+{
+    loop {
+        let (pos, ch) = char_indices.next()?;
+
+        if !ch.is_whitespace() {
+            return Some((pos, ch));
+        }
+    }
+}
+
+fn expect_colon<I>(char_indices: &mut I) -> Option<(usize, char)>
+where
+    I: Iterator<Item = (usize, char)>,
+{
+    let (pos, ch) = char_indices.next()?;
+    if ch == ':' { Some((pos, ch)) } else { None }
+}
+
+fn expect_colon_with_whitespace<I>(char_indices: &mut I) -> Option<(usize, char)>
+where
+    I: Iterator<Item = (usize, char)>,
+{
+    loop {
+        let (pos, ch) = char_indices.next()?;
+
+        match ch {
+            ':' => {
+                return Some((pos, ch));
+            }
+            _ => {
+                if ch.is_whitespace() {
+                    if is_newline_ch(ch) {
+                        return None;
+                    }
+                } else {
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+fn expect_space<I>(char_indices: &mut I) -> Option<(usize, char)>
+where
+    I: Iterator<Item = (usize, char)>,
+{
+    let (pos, ch) = char_indices.next()?;
+    if ch == ' ' { Some((pos, ch)) } else { None }
+}
+
+fn expect_non_whitespace<I>(char_indices: &mut I) -> Option<(usize, char)>
+where
+    I: Iterator<Item = (usize, char)>,
+{
+    let (pos, ch) = char_indices.next()?;
+    if ch.is_whitespace() {
+        return None;
+    }
+    Some((pos, ch))
+}
+
+/// Parses the scope after the '('.
+fn parse_scope<I>(char_indices: &mut I) -> Option<(usize, usize)>
+where
+    I: Iterator<Item = (usize, char)>,
+{
+    let end_scope_idx;
+
+    let (pos, ch) = char_indices.next()?;
+    let start_scope_idx = pos;
+    match ch {
+        ')' => {
+            end_scope_idx = pos;
+        }
+        _ if ch.is_whitespace() => {
+            return None;
+        }
+        _ => loop {
+            let (pos, ch) = char_indices.next()?;
+            match ch {
+                ')' => {
+                    end_scope_idx = pos;
+                    break;
+                }
+                _ if ch.is_whitespace() => {
+                    return None;
+                }
+                _ => {}
+            }
+        },
+    }
+    Some((start_scope_idx, end_scope_idx))
+}
+
+fn parse_desc<I>(char_indices: &mut I) -> Option<(usize, Option<usize>)>
+where
+    I: Iterator<Item = (usize, char)>,
+{
+    let (start_desc_idx, _) = expect_non_whitespace(char_indices)?;
+
+    loop {
+        if let Some((pos, ch)) = char_indices.next() {
+            if is_newline_ch(ch) {
+                return Some((start_desc_idx, Some(pos)));
+            }
+        } else {
+            return Some((start_desc_idx, None));
+        }
+    }
 }
 
 /// Parse a commit message into the structured elements of the [Conventional
@@ -202,22 +324,13 @@ impl<'a> Commit<'a> {
 /// an error can be returned.
 ///
 /// [conv_commits]: https://www.conventionalcommits.org/
-pub fn parse(text: &str) -> Result<Commit<'_>, Error> {
+pub fn parse(text: &str) -> Result<Commit<'_>> {
     let mut is_breaking_change = false;
 
     let mut char_indices = text.char_indices();
-    let start_ty_idx;
-
-    loop {
-        let (pos, ch) = char_indices.next().ok_or(Error {
-            code: InvalidElement::Type,
-        })?;
-
-        if !ch.is_whitespace() {
-            start_ty_idx = pos;
-            break;
-        }
-    }
+    let (start_ty_idx, _) = skip_whitespace(&mut char_indices).ok_or(Error {
+        code: InvalidElement::Type,
+    })?;
 
     let ty;
     let scope: Option<&str>;
@@ -237,86 +350,28 @@ pub fn parse(text: &str) -> Result<Commit<'_>, Error> {
             '(' => {
                 end_ty_idx = pos;
 
-                let end_scope_idx;
-
-                let (pos, ch) = char_indices.next().ok_or(Error {
-                    code: InvalidElement::Scope,
-                })?;
-                let start_scope_idx = pos;
-                match ch {
-                    ')' => {
-                        end_scope_idx = pos;
-                        scope = Some(&text[start_scope_idx..end_scope_idx]);
-                    }
-                    _ => loop {
-                        let (pos, ch) = char_indices.next().ok_or(Error {
-                            code: InvalidElement::Scope,
-                        })?;
-                        match ch {
-                            ')' => {
-                                end_scope_idx = pos;
-                                scope = Some(&text[start_scope_idx..end_scope_idx]);
-                                break;
-                            }
-                            _ if ch.is_whitespace() => {
-                                if is_newline_ch(ch) {
-                                    return Err(Error {
-                                        code: InvalidElement::Scope,
-                                    });
-                                }
-                            }
-                            _ => {}
-                        }
-                    },
-                }
-
-                loop {
-                    let (_pos, ch) = char_indices.next().ok_or(Error {
+                let (start_scope_idx, end_scope_idx) =
+                    parse_scope(&mut char_indices).ok_or(Error {
                         code: InvalidElement::Scope,
                     })?;
-                    match ch {
-                        ':' => {
-                            break;
-                        }
-                        '!' => {
-                            is_breaking_change = true;
 
-                            loop {
-                                let (_, ch) = char_indices.next().ok_or(Error {
-                                    code: InvalidElement::Scope,
-                                })?;
-                                match ch {
-                                    ':' => {
-                                        break;
-                                    }
-                                    _ if ch.is_whitespace() => {
-                                        if is_newline_ch(ch) {
-                                            return Err(Error {
-                                                code: InvalidElement::Type,
-                                            });
-                                        }
-                                    }
-                                    _ => {
-                                        return Err(Error {
-                                            code: InvalidElement::Type,
-                                        });
-                                    }
-                                }
-                            }
-                            break;
-                        }
-                        _ if ch.is_whitespace() => {
-                            if is_newline_ch(ch) {
-                                return Err(Error {
-                                    code: InvalidElement::Type,
-                                });
-                            }
-                        }
-                        _ => {
-                            return Err(Error {
-                                code: InvalidElement::Type,
-                            });
-                        }
+                scope = Some(&text[start_scope_idx..end_scope_idx]);
+
+                let (_, ch) = char_indices.next().ok_or(Error {
+                    code: InvalidElement::Prefix,
+                })?;
+                match ch {
+                    ':' => {}
+                    '!' => {
+                        is_breaking_change = true;
+                        expect_colon(&mut char_indices).ok_or(Error {
+                            code: InvalidElement::Prefix,
+                        })?;
+                    }
+                    _ => {
+                        return Err(Error {
+                            code: InvalidElement::Prefix,
+                        });
                     }
                 }
             }
@@ -325,31 +380,12 @@ pub fn parse(text: &str) -> Result<Commit<'_>, Error> {
                 scope = None;
                 is_breaking_change = true;
 
-                loop {
-                    let (_, ch) = char_indices.next().ok_or(Error {
-                        code: InvalidElement::Type,
-                    })?;
-                    match ch {
-                        ':' => {
-                            break;
-                        }
-                        _ if ch.is_whitespace() => {
-                            if is_newline_ch(ch) {
-                                return Err(Error {
-                                    code: InvalidElement::Type,
-                                });
-                            }
-                        }
-                        _ => {
-                            return Err(Error {
-                                code: InvalidElement::Type,
-                            });
-                        }
-                    }
-                }
+                expect_colon(&mut char_indices).ok_or(Error {
+                    code: InvalidElement::Prefix,
+                })?;
             }
             _ => {
-                if is_newline_ch(ch) {
+                if ch.is_whitespace() {
                     return Err(Error {
                         code: InvalidElement::Type,
                     });
@@ -362,42 +398,25 @@ pub fn parse(text: &str) -> Result<Commit<'_>, Error> {
         break;
     }
 
-    let start_desc_idx;
+    expect_space(&mut char_indices).ok_or(Error {
+        code: InvalidElement::Prefix,
+    })?;
 
-    loop {
-        let (pos, ch) = char_indices.next().ok_or(Error {
-            code: InvalidElement::Desc,
-        })?;
-
-        if !ch.is_whitespace() {
-            start_desc_idx = pos;
-            break;
-        }
-    }
-
-    let desc;
-
-    let end_desc_idx;
-
-    loop {
-        if let Some((pos, ch)) = char_indices.next() {
-            if is_newline_ch(ch) {
-                end_desc_idx = pos;
-                desc = &text[start_desc_idx..end_desc_idx];
-                break;
-            }
-        } else {
-            desc = &text[start_desc_idx..];
+    let desc = match parse_desc(&mut char_indices).ok_or(Error {
+        code: InvalidElement::Desc,
+    })? {
+        (start_desc_idx, Some(end_desc_idx)) => &text[start_desc_idx..end_desc_idx],
+        (start_desc_idx, None) => {
             return Ok(Commit {
                 ty,
                 scope,
                 is_breaking_change,
-                desc,
+                desc: &text[start_desc_idx..],
                 body: "",
-                footers: "",
+                footer: "",
             });
         }
-    }
+    };
 
     let Some((_, ch)) = char_indices.next() else {
         return Ok(Commit {
@@ -406,7 +425,7 @@ pub fn parse(text: &str) -> Result<Commit<'_>, Error> {
             is_breaking_change,
             desc,
             body: "",
-            footers: "",
+            footer: "",
         });
     };
 
@@ -416,7 +435,21 @@ pub fn parse(text: &str) -> Result<Commit<'_>, Error> {
         });
     }
 
+    let mut char_indices = char_indices.peekable();
+
     let start_body_idx;
+
+    let mut start_line_idx;
+
+    // used to advance the body
+    let mut is_last_ch_whitespace = false;
+
+    let mut is_prev_line_blank = true;
+
+    let mut is_cur_line_blank = true;
+    let mut is_line_possibly_trailer = true;
+
+    let mut is_prev_ch_newline;
 
     loop {
         let Some((pos, ch)) = char_indices.next() else {
@@ -426,22 +459,31 @@ pub fn parse(text: &str) -> Result<Commit<'_>, Error> {
                 is_breaking_change,
                 desc,
                 body: "",
-                footers: "",
+                footer: "",
             });
         };
 
-        if !ch.is_whitespace() {
+        if !is_newline_ch(ch) {
             start_body_idx = pos;
+            start_line_idx = pos;
+            is_prev_ch_newline = false;
+
+            if ch.is_whitespace() {
+                is_last_ch_whitespace = true;
+                is_line_possibly_trailer = false;
+            } else {
+                is_cur_line_blank = false;
+            }
+
             break;
         }
     }
 
     let mut end_body_idx = start_body_idx;
-    let mut is_last_ch_whitspace = false;
 
     loop {
         let Some((pos, ch)) = char_indices.next() else {
-            if !is_last_ch_whitspace {
+            if !is_last_ch_whitespace {
                 end_body_idx = text.len();
             }
             return Ok(Commit {
@@ -450,17 +492,74 @@ pub fn parse(text: &str) -> Result<Commit<'_>, Error> {
                 is_breaking_change,
                 desc,
                 body: &text[start_body_idx..end_body_idx],
-                footers: "",
+                footer: "",
             });
         };
 
+        if is_prev_ch_newline {
+            is_prev_ch_newline = false;
+            start_line_idx = pos;
+        }
+
         if ch.is_whitespace() {
-            if !is_last_ch_whitspace {
+            if !is_line_possibly_trailer && !is_last_ch_whitespace {
                 end_body_idx = pos;
             }
-            is_last_ch_whitspace = true;
+            is_last_ch_whitespace = true;
+
+            if is_newline_ch(ch) {
+                if is_cur_line_blank {
+                    is_prev_line_blank = true;
+                }
+                is_cur_line_blank = true;
+                is_line_possibly_trailer = true;
+                is_prev_ch_newline = true;
+            } else {
+                if is_line_possibly_trailer && is_prev_line_blank && ch == ' ' {
+                    if let Some((_, peek)) = char_indices.peek() {
+                        if *peek == '#' {
+                            // footer here
+                            break;
+                        }
+                    }
+                }
+
+                is_line_possibly_trailer = false;
+            }
         } else {
-            is_last_ch_whitspace = false;
+            is_last_ch_whitespace = false;
+            is_cur_line_blank = false;
+
+            if is_line_possibly_trailer && is_prev_line_blank && ch == ':' {
+                if let Some((_, peek)) = char_indices.peek() {
+                    if *peek == ' ' {
+                        // footer here
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    let start_footer_idx = start_line_idx;
+    let mut end_footer_idx = start_line_idx;
+    is_last_ch_whitespace = false;
+
+    loop {
+        let Some((pos, ch)) = char_indices.next() else {
+            if !is_last_ch_whitespace {
+                end_footer_idx = text.len();
+            }
+            break;
+        };
+
+        if ch.is_whitespace() {
+            if !is_last_ch_whitespace {
+                end_footer_idx = pos;
+            }
+            is_last_ch_whitespace = true;
+        } else {
+            is_last_ch_whitespace = false;
         }
     }
 
@@ -470,7 +569,7 @@ pub fn parse(text: &str) -> Result<Commit<'_>, Error> {
         is_breaking_change,
         desc,
         body: &text[start_body_idx..end_body_idx],
-        footers: "",
+        footer: &text[start_footer_idx..end_footer_idx],
     })
 }
 
@@ -479,7 +578,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_basic_msg() -> Result<(), Error> {
+    fn parse_basic_msg() -> Result<()> {
         let msg = r#"feat: add parser to implementation"#;
         let c = parse(msg)?;
         assert_eq!(c.ty(), "feat");
@@ -487,12 +586,12 @@ mod tests {
         assert!(!c.is_breaking_change());
         assert_eq!(c.desc(), "add parser to implementation");
         assert_eq!(c.body(), "");
-        // TODO
+        assert_eq!(c.footer(), "");
         Ok(())
     }
 
     #[test]
-    fn parse_breaking_change() -> Result<(), Error> {
+    fn parse_breaking_change() -> Result<()> {
         let msg = r#"fix!: remove whitespace in scope"#;
         let c = parse(msg)?;
         assert_eq!(c.ty(), "fix");
@@ -500,12 +599,12 @@ mod tests {
         assert!(c.is_breaking_change());
         assert_eq!(c.desc(), "remove whitespace in scope");
         assert_eq!(c.body(), "");
-        // TODO
+        assert_eq!(c.footer(), "");
         Ok(())
     }
 
     #[test]
-    fn parse_scope_and_breaking_change() -> Result<(), Error> {
+    fn parse_scope_and_breaking_change() -> Result<()> {
         let msg = r#"fix(api)!: remove whitespace in scope"#;
         let c = parse(msg)?;
         assert_eq!(c.ty(), "fix");
@@ -513,12 +612,12 @@ mod tests {
         assert!(c.is_breaking_change());
         assert_eq!(c.desc(), "remove whitespace in scope");
         assert_eq!(c.body(), "");
-        // TODO
+        assert_eq!(c.footer(), "");
         Ok(())
     }
 
     #[test]
-    fn parse_no_body() -> Result<(), Error> {
+    fn parse_no_body() -> Result<()> {
         let msg = r#"docs: fix spelling in README"#;
         let c = parse(msg)?;
         assert_eq!(c.ty(), "docs");
@@ -526,12 +625,12 @@ mod tests {
         assert!(!c.is_breaking_change());
         assert_eq!(c.desc(), "fix spelling in README");
         assert_eq!(c.body(), "");
-        // TODO
+        assert_eq!(c.footer(), "");
         Ok(())
     }
 
     #[test]
-    fn parse_scope() -> Result<(), Error> {
+    fn parse_scope() -> Result<()> {
         let msg = r#"feat(api): add scope parsing"#;
         let c = parse(msg)?;
         assert_eq!(c.ty(), "feat");
@@ -539,12 +638,12 @@ mod tests {
         assert!(!c.is_breaking_change());
         assert_eq!(c.desc(), "add scope parsing");
         assert_eq!(c.body(), "");
-        // TODO
+        assert_eq!(c.footer(), "");
         Ok(())
     }
 
     #[test]
-    fn parse_single_paragraph_body() -> Result<(), Error> {
+    fn parse_single_paragraph_body() -> Result<()> {
         let msg = r#"feat: add scope parsing
 
 Parse the scope in parentheses.
@@ -555,7 +654,46 @@ Parse the scope in parentheses.
         assert!(!c.is_breaking_change());
         assert_eq!(c.desc(), "add scope parsing");
         assert_eq!(c.body(), "Parse the scope in parentheses.");
-        // TODO
+        assert_eq!(c.footer(), "");
+        Ok(())
+    }
+
+    #[test]
+    fn parse_multi_paragraph_body() -> Result<()> {
+        let msg = r#"feat: add scope parsing
+
+Parse the scope in parentheses.
+
+More description.
+"#;
+        let c = parse(msg)?;
+        assert_eq!(c.ty(), "feat");
+        assert_eq!(c.scope(), None);
+        assert!(!c.is_breaking_change());
+        assert_eq!(c.desc(), "add scope parsing");
+        assert_eq!(
+            c.body(),
+            "Parse the scope in parentheses.\n\nMore description."
+        );
+        assert_eq!(c.footer(), "");
+        Ok(())
+    }
+
+    #[test]
+    fn parse_single_footer() -> Result<()> {
+        let msg = r#"feat: add scope parsing
+
+Parse the scope in parentheses.
+
+Reviewed-By: example
+"#;
+        let c = parse(msg)?;
+        assert_eq!(c.ty(), "feat");
+        assert_eq!(c.scope(), None);
+        assert!(!c.is_breaking_change());
+        assert_eq!(c.desc(), "add scope parsing");
+        assert_eq!(c.body(), "Parse the scope in parentheses.");
+        assert_eq!(c.footer(), "Reviewed-By: example");
         Ok(())
     }
 }
