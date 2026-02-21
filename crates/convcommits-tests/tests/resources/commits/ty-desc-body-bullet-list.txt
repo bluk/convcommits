@@ -1,6 +1,0 @@
-docs: add platform support
-
-List:
-- a
-- b
-- c, d

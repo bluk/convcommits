@@ -1,8 +1,0 @@
----
-source: crates/convcommits-tests/src/lib.rs
-expression: "&parsed_msg"
-info:
-  msg: ""
-input_file: crates/convcommits-tests/tests/resources/commits/empty.txt
----
-Err: Ty

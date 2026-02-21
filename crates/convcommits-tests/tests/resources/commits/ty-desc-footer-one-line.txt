@@ -1,3 +1,0 @@
-feat: add support for tooling
-
-Authored-by: Jane Doe

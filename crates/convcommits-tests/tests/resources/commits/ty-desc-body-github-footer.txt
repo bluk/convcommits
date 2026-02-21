@@ -1,5 +1,0 @@
-docs(readme): add platforms
-
-Update supported platforms.
-
-Closes #437

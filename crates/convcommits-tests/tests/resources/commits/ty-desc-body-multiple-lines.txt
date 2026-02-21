@@ -1,5 +1,0 @@
-docs: add method docs
-
-Document methods on Message type.
-
-Document parser method.

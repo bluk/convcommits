@@ -1,3 +1,0 @@
-feat: add scope parsing
-
-Parse the scope in parentheses.
